@@ -1,6 +1,9 @@
 import pygame
 import sys
 import random
+import numpy as np
+import neat
+
 
 # Initialize Pygame
 pygame.init()
@@ -81,6 +84,14 @@ class Ground:
         for x_offset in range(0, screen_width, self.width):
             screen.blit(self.image, (self.x + x_offset, self.y))
 
+def get_input_features(dino, cactus):
+    distance_to_cactus = cactus.x - dino.x
+    dino_y = dino.y
+    cactus_height = cactus.height
+
+    return [distance_to_cactus, dino_y, cactus_height]
+
+
 # Initialize the game elements
 dino = Dino(50, 200, 50, 50)
 ground = Ground(0, 235, 800, 50)
@@ -103,45 +114,122 @@ font = pygame.font.Font(None, 36)
 
 
 # Main game loop
-while True:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
-            sys.exit()
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE and not game_over:
+def main():
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE and not game_over:
+                    dino.jump()
+        screen.fill((255, 255, 255))
+
+        # Display the current score
+        display_score(screen, score, font)
+
+        if not game_over:
+            # Update and draw game elements on the screen
+            ground.draw(screen)
+            dino.update()
+            dino.draw(screen)
+            cactus.update()
+            cactus.draw(screen)
+
+            # Update the score
+            score += 1
+
+
+            # Check for collisions
+            dino_rect = pygame.Rect(dino.x, dino.y, dino.width, dino.height)
+            cactus_rect = pygame.Rect(cactus.x, cactus.y, cactus.width, cactus.height)
+
+            if dino_rect.colliderect(cactus_rect):
+                print("Game Over!")
+                game_over = True
+
+        if game_over:
+            display_game_over(screen, score)
+
+            # Update the game display
+        pygame.display.update()
+        clock.tick(30)
+
+def eval_genomes(genomes, config):
+    for genome_id, genome in genomes:
+        # Set up the game elements
+        dino = Dino(50, 200, 50, 50)
+        ground = Ground(0, 235, 800, 50)
+        cactus = Cactus(800, 200, 50, 50)
+
+        # Create the neural network from the genome
+        net = neat.nn.FeedForwardNetwork.create(genome, config)
+
+        score = 0
+        game_over = False
+
+        while not game_over:
+            # Calculate the input features and make a decision using the neural network
+            inputs = get_input_features(dino, cactus)
+            output = net.activate(inputs)
+
+            # Make the dino jump if the output is greater than 0.5
+            if output[0] > 0.5:
                 dino.jump()
-    screen.fill((255, 255, 255))
 
-    # Display the current score
-    display_score(screen, score, font)
+            # Update and check for collisions
+            dino.update()
+            cactus.update()
+            dino_rect = pygame.Rect(dino.x, dino.y, dino.width, dino.height)
+            cactus_rect = pygame.Rect(cactus.x, cactus.y, cactus.width, cactus.height)
+            if dino_rect.colliderect(cactus_rect):
+                game_over = True
 
-    if not game_over:
-        # Update and draw game elements on the screen
-        ground.draw(screen)
-        dino.update()
-        dino.draw(screen)
-        cactus.update()
-        cactus.draw(screen)
+            # Draw game elements
+            screen.fill((255, 255, 255))
+            ground.draw(screen)
+            dino.draw(screen)
+            cactus.draw(screen)
 
-        # Update the score
-        score += 1
+            # Display the current score
+            display_score(screen, score, font)
+
+            # Update the game display and maintain a consistent frame rate
+            pygame.display.update()
+            clock.tick(30)
+
+            # Handle any Pygame events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+
+            score += 1
+
+        # Set the genome's fitness to the final score
+        genome.fitness = score
 
 
-        # Check for collisions
-        dino_rect = pygame.Rect(dino.x, dino.y, dino.width, dino.height)
-        cactus_rect = pygame.Rect(cactus.x, cactus.y, cactus.width, cactus.height)
+if __name__ == "__main__":
+    # Load the NEAT configuration
+    config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
+                         neat.DefaultSpeciesSet, neat.DefaultStagnation,
+                         'config_neat.ini')
 
-        if dino_rect.colliderect(cactus_rect):
-            print("Game Over!")
-            game_over = True
+    # Create the NEAT population
+    pop = neat.Population(config)
 
-    if game_over:
-        display_game_over(screen, score)
+    # Add a reporter to show progress in the terminal
+    pop.add_reporter(neat.StdOutReporter(True))
+    stats = neat.StatisticsReporter()
+    pop.add_reporter(stats)
 
-        # Update the game display
-    pygame.display.update()
-    clock.tick(30)
+    # Train the neural networks
+    winner = pop.run(eval_genomes, 50)
+
+    # Save the winner genome to a file
+    with open('winner_genome.pkl', 'wb') as output:
+        pickle.dump(winner, output, 1)
 
 pygame.quit()
 sys.exit()
